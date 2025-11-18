@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>津波避難シミュレーション</title>
+  <style>
+    :root { --header-h: 64px; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; overflow: hidden; overscroll-behavior: none; touch-action: manipulation; font-family: Arial, sans-serif; }
+
+    /* 固定ヘッダー */
+    header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: var(--header-h);
+      background-color: #00bfff;
+      color: #fff;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.15);
+      pointer-events: auto;
+    }
+    .header-left {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    header h1 {
+      font-size: 1.05rem;
+      margin: 0;
+      line-height: 1.2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    header .subtext {
+      font-size: 0.75rem;
+      margin: 0;
+      color: #eaf7ff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    /* 言語切替ボタン（薄いグレー） */
+    .lang-toggle {
+      appearance: none;
+      border: 1px solid #d0d0d0;
+      background: #eee;
+      color: #555; /* 濃いグレー文字 */
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .lang-toggle:active { transform: translateY(1px); }
+
+    .container {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding-top: var(--header-h); /* ヘッダー分だけ下げる */
+    }
+    .map-area {
+      flex: 1;
+      position: relative;
+    }
+    #map {
+      position: absolute;
+      inset: 0;
+      touch-action: pan-x pan-y;
+    }
+    .info-area {
+      position: fixed;
+      bottom: 24px; /* フッターの上に配置 */
+      left: 0;
+      width: 100vw;
+      background-color: #e0e0e0;
+      padding: 8px 12px;
+      font-size: 0.85em;
+      z-index: 900;
+      box-shadow: 0 0 10px rgba(0,0,0,.3);
+      pointer-events: auto;
+    }
+    .info-area h2 { font-size: 1em; margin: 0; }
+    #nearest-destination { margin-top: 4px; font-size: 0.95em; }
+    .button-row { display: flex; gap: 10px; margin-top: 8px; }
+    .button-row button {
+      flex: 1;
+      font-size: 0.95em;
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      color: white;
+      cursor: pointer;
+      white-space: nowrap;
+      pointer-events: auto;
+    }
+    button.use-location { background-color: #007bff; }
+    button.use-location:hover { background-color: #005fcc; }
+    button.launch-gmap { background-color: #28a745; }
+    button.launch-gmap:hover { background-color: #218838; }
+
+    footer {
+      background: #fff;
+      color: gray;
+      text-align: center;
+      padding: 3px;
+      font-size: 0.6em;
+      position: fixed;
+      width: 100%;
+      bottom: 0;
+      z-index: 800;
+      pointer-events: auto;
+    }
+
+
+/* 現在位置ボタン（見た目） */
+#btn-current {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #fff;                 /* ← 常に白い丸 */
+  box-shadow: 0 2px 10px rgba(0,0,0,.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  z-index: 1000;
+  border: 1px solid rgba(0,0,0,.06);
+  transition: transform .06s ease;
+}
+#btn-current:active { transform: scale(.98); }
+#btn-current svg { width: 22px; height: 22px; }
+
+/* 矢印の色（通常：グレー） */
+#btn-current .arrow {
+  fill: #9aa0a6; /* or #8a8f98 */
+  transition: fill .18s ease;
+}
+
+/* タップ時：一瞬だけ青く（600ms間 .flash が付く）*/
+#btn-current.flash .arrow {
+  fill: #1a73e8;
+}
+
+#btn-current .status-label{
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  font-size: 11px;        /* 小さい字 */
+  line-height: 1;
+  color: #5f6368;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;    /* 地図の操作を邪魔しない */
+}
+
+/* トラッキングON：青い矢印。背景は白いまま */
+#btn-current.active { 
+  background: #fff;                 /* ← 白を維持 */
+  box-shadow: 0 2px 12px rgba(26,115,232,.28); /* 視認性向上（任意） */
+  border-color: rgba(26,115,232,.25);
+}
+#btn-current.active .arrow {
+  fill: #1a73e8;
+}
+
+/* 旧：背景を青くするフラッシュ演出を解除（背景は白維持） */
+#btn-current.flash { animation: none; }
+/* 既存の @keyframes flash-blue は未使用になるため削除可 */
+
+    @media (max-width: 768px) {
+      :root { --header-h: 58px; }
+      header h1 { font-size: 1rem; }
+      header .subtext { font-size: 0.7rem; }
+      .button-row { gap: 6px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <h1 id="title">津波避難シミュレーション</h1>
+      <p class="subtext" id="subtext">📍 地図をクリックすると避難経路を表示します</p>
+    </div>
+    <button id="lang-toggle" class="lang-toggle" aria-label="switch language">EN</button>
+  </header>
+
+  <div class="container">
+    <div class="map-area">
+      <div id="map"></div>
+
+      <!-- 現在位置ボタン：タップで現在地にズーム、長押しで追跡ON/OFF -->
+      <div id="btn-current" aria-label="現在地" title="現在地">
+        <!-- ピン風のシンプルな青アイコン（SVG） -->
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path class="arrow" d="M12 2 L18 18 L12 14 L6 18 L10 10 Z"></path>
+        </svg>
+        <!-- 状態ラベル（ボタン直下・中央揃え） -->
+        <div id="btn-current-status" class="status-label">現在地</div>
+      </div>
+    </div>
+    <div class="info-area">
+      <h2 id="info-title">最短の避難先：</h2>
+      <p id="nearest-destination">クリックして確認してください</p>
+      <div class="button-row">
+        <button id="btn-use-location" class="use-location" onclick="useCurrentLocation()">現在地から避難</button>
+        <button id="btn-launch-gmap" class="launch-gmap" onclick="launchGoogleMap()">Googleマップ</button>
+      </div>
+    </div>
+  </div>
+
+  <footer>都市地域デザイン学研究室</footer>
+
+  <script>
+    // UIテキスト辞書（日本語/英語）
+    const UI_TEXT = {
+      ja: {
+        title: "津波避難シミュレーション",
+        subtext: "📍 地図をクリックすると避難経路を表示します",
+        infoTitle: "最短の避難先：",
+        nearestPlaceholder: "クリックして確認してください",
+        btnUseLocation: "現在地から避難",
+        btnLaunchGmap: "Googleマップ",
+        toggleLabel: "EN"
+      },
+      en: {
+        title: "Tsunami Evacuation Simulation",
+        subtext: "📍 Click the map to show an evacuation route",
+        infoTitle: "Nearest destination:",
+        nearestPlaceholder: "Click the map to check",
+        btnUseLocation: "Evacuate from current location",
+        btnLaunchGmap: "Open Google Maps",
+        toggleLabel: "日"
+      }
+    };
+
+    let currentLang = "ja";
+
+    function applyUITexts(lang) {
+      const t = UI_TEXT[lang];
+      document.getElementById("title").textContent = t.title;
+      document.getElementById("subtext").textContent = t.subtext;
+      document.getElementById("info-title").textContent = t.infoTitle;
+      document.getElementById("nearest-destination").textContent = t.nearestPlaceholder;
+      document.getElementById("btn-use-location").textContent = t.btnUseLocation;
+      document.getElementById("btn-launch-gmap").textContent = t.btnLaunchGmap;
+      document.getElementById("lang-toggle").textContent = t.toggleLabel;
+      // map_eva.js 側のメッセージ言語も切替
+      if (window.setAppLanguage) window.setAppLanguage(lang);
+      if (window.refreshCurrentStatusLabel) window.refreshCurrentStatusLabel();
+
+    }
+
+    document.getElementById("lang-toggle").addEventListener("click", function() {
+      currentLang = currentLang === "ja" ? "en" : "ja";
+      applyUITexts(currentLang);
+    });
+
+    // 初期適用
+    applyUITexts(currentLang);
+  </script>
+
+  <script async defer
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDHARZBVr3rzCr_ejyqvMVxoU-V9VfKnfw&language=ja&callback=initMap">
+  </script>
+  <script src="./map_eva.js"></script>
+</body>
+</html>
