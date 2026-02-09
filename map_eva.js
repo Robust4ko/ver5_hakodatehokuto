@@ -650,6 +650,17 @@ function stopTracking() {
   }
   tracking = false;
   setCurrentBtnState(false);
+
+  
+  // マーカー点滅OFF
+  if (currentMarker?.getIcon && currentMarker.setIcon) {
+    const icon = currentMarker.getIcon();
+    currentMarker.setIcon({
+      ...icon,
+      fillOpacity: 1,
+    });
+    currentMarker.setLabel(null);
+  }
 }
 
 // 現在位置ボタン（タップでトラッキングON/OFF）
