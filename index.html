@@ -121,8 +121,7 @@
       pointer-events: auto;
     }
 
-
-/* 現在位置ボタン（見た目） */
+/* === 現在位置ボタン（見た目） === */
 #btn-current {
   position: absolute;
   right: 12px;
@@ -144,44 +143,29 @@
 #btn-current:active { transform: scale(.98); }
 #btn-current svg { width: 22px; height: 22px; }
 
-/* 矢印の色（通常：グレー） */
-#btn-current .arrow {
-  fill: #9aa0a6; /* or #8a8f98 */
-  transition: fill .18s ease;
-}
+/* 矢印の色（常にグレー固定） */
+#btn-current .arrow { fill: #9aa0a6 !important; transition: fill .18s ease; }
 
-/* タップ時：一瞬だけ青く（600ms間 .flash が付く）*/
-#btn-current.flash .arrow {
-  fill: #1a73e8;
-}
-
-#btn-current .status-label{
+/* ラベル（ボタン直下・中央揃え） */
+#btn-current .status-label {
   position: absolute;
   top: 100%;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(-50%); /* 円の中心線と文字中心線を一致 */
   margin-top: 4px;
-  font-size: 11px;        /* 小さい字 */
+  font-size: 11px;  /* 小さめ */
   line-height: 1;
-  color: #5f6368;
+  color: #9aa0a6;   /* 通常はグレー */
   text-align: center;
   white-space: nowrap;
-  pointer-events: none;    /* 地図の操作を邪魔しない */
+  pointer-events: none; /* 地図操作を邪魔しない */
 }
 
-/* トラッキングON：青い矢印。背景は白いまま */
-#btn-current.active { 
-  background: #fff;                 /* ← 白を維持 */
-  box-shadow: 0 2px 12px rgba(26,115,232,.28); /* 視認性向上（任意） */
-  border-color: rgba(26,115,232,.25);
-}
-#btn-current.active .arrow {
-  fill: #1a73e8;
-}
+/* トラッキング中のみラベル色を水色に（色だけ変える） */
+#btn-current.tracking .status-label { color: #1a73e8; }
 
-/* 旧：背景を青くするフラッシュ演出を解除（背景は白維持） */
-#btn-current.flash { animation: none; }
-/* 既存の @keyframes flash-blue は未使用になるため削除可 */
+/* 初期の軽いグレーアウト演出（任意） */
+#btn-current.idle { opacity: .85; }
 
     @media (max-width: 768px) {
       :root { --header-h: 58px; }
@@ -204,14 +188,18 @@
     <div class="map-area">
       <div id="map"></div>
 
-      <!-- 現在位置ボタン：タップで現在地にズーム、長押しで追跡ON/OFF -->
-      <div id="btn-current" aria-label="現在地" title="現在地">
-        <!-- ピン風のシンプルな青アイコン（SVG） -->
+      <!-- 現在位置ボタン：タップでトラッキングON/OFF（ラベル色のみ変化） -->
+      <div id="btn-current"
+           class="idle"
+           role="button"
+           aria-label="現在地"
+           aria-pressed="false"
+           title="現在地"
+           tabindex="0">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path class="arrow" d="M12 2 L18 18 L12 14 L6 18 L10 10 Z"></path>
         </svg>
-        <!-- 状態ラベル（ボタン直下・中央揃え） -->
-        <div id="btn-current-status" class="status-label">現在地</div>
+        <div class="status-label" aria-hidden="true">現在地</div>
       </div>
     </div>
     <div class="info-area">
@@ -262,8 +250,6 @@
       document.getElementById("lang-toggle").textContent = t.toggleLabel;
       // map_eva.js 側のメッセージ言語も切替
       if (window.setAppLanguage) window.setAppLanguage(lang);
-      if (window.refreshCurrentStatusLabel) window.refreshCurrentStatusLabel();
-
     }
 
     document.getElementById("lang-toggle").addEventListener("click", function() {

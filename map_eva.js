@@ -1,27 +1,14 @@
 /**
- * PATCH NOTES (2025-10-23):
- * - Fix "closest destination" selection after Distance Matrix response:
- *   Initialize with the first element whose status === "OK", then compare ONLY OK elements.
- *   If none are OK, fall back to haversine straight-line nearest.
- * - Apply the same robust logic to the secondary (fallback) Distance Matrix block as well.
- * - Add defensive null checks when reading distance/duration from the chosen element.
- * 
- * Rationale:
- * Some devices/poor network conditions return ZERO_RESULTS/NOT_FOUND for the first element.
- * The previous implementation initialized minDistance from distances[0].distance.value,
- * which can be undefined and break comparisons, accidentally keeping index 0.
- * This caused HB to be chosen even when a closer HP existed and was visible.
+ * PATCH NOTES (2026-02-09):
+ * UI: Current-location button is now a 2-state toggle.
+ *  - Initial: idle (label "現在地" in gray, small, centered under button)
+ *  - Tapping toggles watchPosition on/off; only the label color changes (gray <-> blue).
+ * Interaction: Removed long-press + flash behavior; simplified to click toggle.
+ * UX: Start marker brought to front; current overlay does not intercept clicks.
+ * Logic: useCurrentLocation() reuses tracked position when available for immediate response.
+ *
+ * Based on ver4.4 core logic with robust Distance Matrix selection.
  */
-
-// map_eva.js ver4.4（SVGアイコン + 多言語 + DistanceMatrix フォールバック）
-
-/*
- 1. コマンドプロンプトで、「E:\」を入力
- 2. cd "E:\2025年度\app_googlemap\map_simulation"
- 3. python -m http.server 8000
- 4. http://localhost:8000/index.html
- 5. 停止は Ctrl+C
-*/
 
 // ===== 多言語メッセージ辞書（UIは index.html 側、運用メッセージはここ）=====
 let APP_LANG = "ja";
@@ -36,17 +23,17 @@ ja: {
   locTimeout: "位置情報の取得がタイムアウトしました。",
   trackingOn: "現在位置の追跡を開始しました。",
   trackingOff: "現在位置の追跡を停止しました。",
-    noNearby: "700m以内に避難場所がありません。",
-    noStartSet: "出発地点が未設定です。地図をタップするか「現在地から避難」を押してください。",
-    routeDrawing: "経路を表示中…",
-    errorPrefix: "エラー: ",
-    dirErrorPrefix: "経路描画エラー: ",
-    geolocFail: (m)=>`現在地の取得に失敗しました: ${m}`,
-    browserNoGeo: "このブラウザは位置情報をサポートしていません。",
-    needStartAndDest: "出発地点と目的地を設定してください。",
-    narrowedTo500: "候補が多いため、500m以内に絞って探索しました。",
-    usingTop25: "候補が多いため、近い25件に絞って探索しました。"
-  },
+  noNearby: "700m以内に避難場所がありません。",
+  noStartSet: "出発地点が未設定です。地図をタップするか「現在地から避難」を押してください。",
+  routeDrawing: "経路を表示中…",
+  errorPrefix: "エラー: ",
+  dirErrorPrefix: "経路描画エラー: ",
+  geolocFail: (m)=>`現在地の取得に失敗しました: ${m}`,
+  browserNoGeo: "このブラウザは位置情報をサポートしていません。",
+  needStartAndDest: "出発地点と目的地を設定してください。",
+  narrowedTo500: "候補が多いため、500m以内に絞って探索しました。",
+  usingTop25: "候補が多いため、近い25件に絞って探索しました。"
+},
 en: {
   loading: "Loading data…",
   ready: "Tap the map to search shelters.",
@@ -56,24 +43,26 @@ en: {
   locUnavailable: "Could not get your location.",
   locTimeout: "Getting location timed out.",
   trackingOn: "Started tracking your location.",
-  trackingOff: "Stopped tracking your location.", 
-    noNearby: "No shelters within 700 m.",
-    noStartSet: "No start point yet. Tap the map or press “Evacuate from current location”.",
-    routeDrawing: " showing route…",
-    errorPrefix: "Error: ",
-    dirErrorPrefix: "Directions error: ",
-    geolocFail: (m)=>`Failed to get current location: ${m}`,
-    browserNoGeo: "This browser does not support Geolocation.",
-    needStartAndDest: "Please set both your start point and destination.",
-    narrowedTo500: "Too many candidates; narrowed to 500 m radius.",
-    usingTop25: "Too many candidates; using the nearest 25."
-  }
+  trackingOff: "Stopped tracking your location.",
+  noNearby: "No shelters within 700 m.",
+  noStartSet: "No start point yet. Tap the map or press “Evacuate from current location”.",
+  routeDrawing: " showing route…",
+  errorPrefix: "Error: ",
+  dirErrorPrefix: "Directions error: ",
+  geolocFail: (m)=>`Failed to get current location: ${m}`,
+  browserNoGeo: "This browser does not support Geolocation.",
+  needStartAndDest: "Please set both your start point and destination.",
+  narrowedTo500: "Too many candidates; narrowed to 500 m radius.",
+  usingTop25: "Too many candidates; using the nearest 25."
+}
 };
 function T(key){ return MSG[APP_LANG][key]; }
 
 // 外部（index.html）から言語を切り替えるために公開
 window.setAppLanguage = function(lang){
   APP_LANG = (lang === "en") ? "en" : "ja";
+  // ラベル文言を言語に合わせて再適用（文言は常に「現在地」/ "Current"）
+  setCurrentBtnState(tracking);
 };
 
 // ===== グローバル変数 =====
@@ -110,31 +99,6 @@ function displayMessage(message) {
   if (el) el.textContent = message;
 }
 
-// === 状態ラベル制御（現在地 / 検索中 / トラッキング中） ===
-function setCurrentButtonStatusLabel(state) {
-  const el = document.getElementById('btn-current-status');
-  if (!el) return;
-
-  // 多言語を考慮（index.html 側で setAppLanguage が呼ばれる前提） 
-  const isJa = (APP_LANG === 'ja');
-  const TXT = {
-    idle:      isJa ? '現在地'     : 'Current location',
-    searching: isJa ? '検索中'     : 'Searching…',
-    tracking:  isJa ? 'トラッキング' : 'Tracking',
-  };
-
-  el.textContent = (state === 'searching')
-    ? TXT.searching
-    : (state === 'tracking')
-      ? TXT.tracking
-      : TXT.idle;
-}
-
-// 言語切替時にも現在の状態でラベルを再描画できるよう公開（任意）
-window.refreshCurrentStatusLabel = function(){
-  setCurrentButtonStatusLabel(tracking ? 'tracking' : 'idle');
-};
-
 // ===== HTMLエスケープ（XSS簡易対策）=====
 function escapeHtml(str) {
   return String(str)
@@ -145,16 +109,30 @@ function escapeHtml(str) {
     .replace(/'/g, "&#39;");
 }
 
+// ===== 現在地ボタンの状態をUIに反映（クラス＆Aria＆文言） =====
+function setCurrentBtnState(isTracking) {
+  const btn = document.getElementById('btn-current');
+  if (!btn) return;
+  btn.classList.toggle('tracking', !!isTracking);
+  btn.classList.toggle('idle', !isTracking);
+  btn.setAttribute('aria-pressed', isTracking ? 'true' : 'false');
+
+  const label = btn.querySelector('.status-label');
+  if (label) {
+    label.textContent = (APP_LANG === 'ja') ? '現在地' : 'Current';
+  }
+}
+
 // ===== 地図初期化 =====
 function initMap() {
-  const center = { lat: 41.775271, lng: 140.7257441 };
+  const center = { lat:43.07565682432503, lng: 141.3406940653519 };
 
   map = new google.maps.Map(document.getElementById("map"), {
     zoom: 15,
     center: center,
     clickableIcons: false,
-    gestureHandling: "greedy",   // ← ピンチ/スクロールを地図側で積極的に受ける
-    scrollwheel: true,           // ← ホイール操作は地図のズームに
+    gestureHandling: "greedy",
+    scrollwheel: true,
     mapTypeControl: false,
     fullscreenControl: false,
     streetViewControl: false
@@ -178,7 +156,7 @@ function initMap() {
   // 距離行列サービス
   distanceMatrixService = new google.maps.DistanceMatrixService();
 
-    // --- ここがポイント：両JSONの読込完了を待ってからクリックを受け付ける ---
+  // --- ここがポイント：両JSONの読込完了を待ってからクリックを受け付ける ---
   displayMessage(T("loading"));
   Promise.all([loadDestinations(), loadEvacPoints()])
     .then(() => {
@@ -194,33 +172,30 @@ function initMap() {
       displayMessage(T("errorPrefix") + err);
     });
 
-
   // 現在位置ボタンのイベント初期化
   initCurrentButton();
 }
 
 // ===== 目的地（避難ビル等）HB.svg =====
-// Promise を返す
 function loadDestinations() {
   return fetch("./destinations.json")
     .then((response) => response.json())
     .then((data) => {
-       data.forEach((dest) => {
+      data.forEach((dest) => {
         const structured = {
-        name: dest.name,
+          name: dest.name,
           location: {
             lat: dest.location?.lat ?? dest.lat,
             lng: dest.location?.lng ?? dest.lng,
           },
         };
         destinations.push(structured);
-      addCustomMarker(structured.location, structured.name, "./HB.svg", 34);
+        addCustomMarker(structured.location, structured.name, "./HB.svg", 34);
       });
     });
 }
 
 // ===== 水平避難ポイント HP.svg（destinationsに統合）=====
-// Promise を返す
 function loadEvacPoints() {
   return fetch("./evac_points.json")
     .then((response) => response.json())
@@ -252,7 +227,7 @@ function addCustomMarker(position, title, iconUrl, sizePx = 32) {
     zIndex: 10,
     icon: {
       url: iconUrl,
-      scaledSize: scaled, // 全面縮小表示
+      scaledSize: scaled,
       anchor: anchor,
       labelOrigin: labelOrigin,
     },
@@ -321,8 +296,8 @@ function setStartPoint(location) {
     position: location,
     map: map,
     title: (APP_LANG === "ja") ? "スタート地点" : "Start point",
-    zIndex: 200,      // ← 追加：精度円(90)・現在地(100)より前面に
-    clickable: false, // ← 任意：InfoWindow不要なら誤タップ防止
+    zIndex: 200,
+    clickable: false
   });
   findClosestPoint(location);
 }
@@ -387,10 +362,7 @@ function findClosestPoint(originLatLng) {
     return;
   }
 
-  // 必要なら注記メッセージ（UIに軽く表示）
   if (selection.note) {
-    // 既存表示を上書きしすぎないよう、注記だけ一時表示
-    // （必要に応じてトースト等に変更可能）
     console.log(selection.note === "narrowedTo500" ? T('narrowedTo500') : T('usingTop25'));
   }
 
@@ -406,26 +378,25 @@ function findClosestPoint(originLatLng) {
       if (status === google.maps.DistanceMatrixStatus.OK) {
         const distances = response.rows[0].elements;
 
-        // 最小距離のインデックスを取得
+        // 最小距離のインデックスを取得（OK要素のみ）
         let closestIndex = -1;
-let minDistance = Infinity;
-// Initialize from OK elements only
-for (let i = 0; i < distances.length; i++) {
-  if (distances[i].status === "OK") {
-    const dv = distances[i].distance.value;
-    if (dv < minDistance) {
-      minDistance = dv;
-      closestIndex = i;
-    }
-  }
-}
-// If no OK elements, fall back to straight-line (haversine) nearest
-if (closestIndex === -1) {
-  const originLL = { lat: origin.lat(), lng: origin.lng() };
-  closestIndex = selection.list
-    .map((d, i) => ({ i, dist: haversineMeters(originLL, d.location) }))
-    .sort((a, b) => a.dist - b.dist)[0].i;
-}
+        let minDistance = Infinity;
+        for (let i = 0; i < distances.length; i++) {
+          if (distances[i].status === "OK") {
+            const dv = distances[i].distance.value;
+            if (dv < minDistance) {
+              minDistance = dv;
+              closestIndex = i;
+            }
+          }
+        }
+        // OKが無ければ直線距離で最短
+        if (closestIndex === -1) {
+          const originLL = { lat: origin.lat(), lng: origin.lng() };
+          closestIndex = selection.list
+            .map((d, i) => ({ i, dist: haversineMeters(originLL, d.location) }))
+            .sort((a, b) => a.dist - b.dist)[0].i;
+        }
 
         latestDestination = selection.list[closestIndex];
 
@@ -442,7 +413,6 @@ if (closestIndex === -1) {
         // 経路描画
         drawRoute(origin, latestDestination.location);
       } else if (status === "MAX_DIMENSIONS_EXCEEDED") {
-        // 念のための二重フォールバック（理論上ここには来ない想定）
         console.warn("MAX_DIMENSIONS_EXCEEDED fallback triggered.");
         const nearest25 = selection.list
           .map(d => ({ d, dist: haversineMeters({ lat: origin.lat(), lng: origin.lng() }, d.location) }))
@@ -460,18 +430,18 @@ if (closestIndex === -1) {
             if (status2 === google.maps.DistanceMatrixStatus.OK) {
               const distances2 = resp2.rows[0].elements;
               let idx = -1, min = Infinity;
-for (let i = 0; i < distances2.length; i++) {
-  if (distances2[i].status === "OK") {
-    const dv = distances2[i].distance.value;
-    if (dv < min) { min = dv; idx = i; }
-  }
-}
-if (idx === -1) {
-  const originLL = { lat: origin.lat(), lng: origin.lng() };
-  idx = nearest25
-    .map((d, i) => ({ i, dist: haversineMeters(originLL, d.location) }))
-    .sort((a, b) => a.dist - b.dist)[0].i;
-}
+              for (let i = 0; i < distances2.length; i++) {
+                if (distances2[i].status === "OK") {
+                  const dv = distances2[i].distance.value;
+                  if (dv < min) { min = dv; idx = i; }
+                }
+              }
+              if (idx === -1) {
+                const originLL = { lat: origin.lat(), lng: origin.lng() };
+                idx = nearest25
+                  .map((d, i) => ({ i, dist: haversineMeters(originLL, d.location) }))
+                  .sort((a, b) => a.dist - b.dist)[0].i;
+              }
               latestDestination = nearest25[idx];
               lastDistanceMeters = distances2[idx]?.distance?.value ?? null;
               lastDurationText  = distances2[idx]?.duration?.text ?? T('walkUnknown');
@@ -533,18 +503,17 @@ function drawRoute(origin, destination) {
 }
 
 // ===== 現在位置の表示・追跡 =====
-// 位置情報（Geolocation）の結果をもとに、現在位置マーカーと精度円を更新する
 function updateCurrentOverlay(pos) {
   const ll = { lat: pos.coords.latitude, lng: pos.coords.longitude };
   const acc = pos.coords.accuracy || 0;
 
-  // 現在位置マーカー（青い丸）— 地図クリックを邪魔しないため clickable: false を追加
+  // 現在位置マーカー（青い丸）— クリック不可にして地図のクリックを阻害しない
   if (!currentMarker) {
     currentMarker = new google.maps.Marker({
       position: ll,
       map,
       zIndex: 100,
-      clickable: false, // ← 追加：マーカー自身はクリックを拾わない
+      clickable: false,
       icon: {
         path: google.maps.SymbolPath.CIRCLE,
         scale: 6,
@@ -558,7 +527,7 @@ function updateCurrentOverlay(pos) {
     currentMarker.setPosition(ll);
   }
 
-  // 精度円（accuracy）— 下の地図へタップを透過させる
+  // 精度円（accuracy）— クリック不可にしてタップを透過
   if (!accuracyCircle) {
     accuracyCircle = new google.maps.Circle({
       map,
@@ -570,45 +539,53 @@ function updateCurrentOverlay(pos) {
       fillColor: "#1a73e8",
       fillOpacity: 0.12,
       zIndex: 90,
-      clickable: false, // ← 追加：円はクリックを拾わない（最重要）
+      clickable: false
     });
   } else {
     accuracyCircle.setCenter(ll);
     accuracyCircle.setRadius(acc);
-    // 既存円にも保険で適用（古いキャッシュで clickable が欠けないように）
     accuracyCircle.setOptions({ clickable: false });
   }
 
   return ll;
 }
 
-// 一回だけ現在位置を取得し、必要ならそこへズームする
-function locateOnce(zoom = true) {
-  if (!navigator.geolocation) {
-    displayMessage(T('locUnavailable') || "位置情報が使えません");
+// 一回だけ現在位置を取得（トラッキング中は即時に既知座標を使う）
+function useCurrentLocation() {
+  if (!dataReady) { displayMessage(T('loading')); return; }
+
+  const tracked = currentMarker?.getPosition();
+  if (tracked) {
+    setStartPoint(tracked);
+    if (!tracking && map) { map.panTo(tracked); }
     return;
   }
 
-  displayMessage(T('loadingLocation') || "現在位置を取得中…");
+  if (!navigator.geolocation) {
+    displayMessage(T('browserNoGeo'));
+    return;
+  }
+
+  displayMessage(T('loadingLocation'));
 
   navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const ll = updateCurrentOverlay(pos);
-      if (zoom) {
-        map.panTo(ll);
-        if (map.getZoom() < 17) map.setZoom(17);
-      }
+    (position) => {
+      const latLng = new google.maps.LatLng(
+        position.coords.latitude,
+        position.coords.longitude
+      );
+      setStartPoint(latLng);
+      map.panTo(latLng);
+      if (map.getZoom() < 17) map.setZoom(17);
     },
-    (err) => {
-      if (err.code === err.PERMISSION_DENIED) {
-        displayMessage(T('locPermissionDenied') || "位置情報の許可がありません。");
-      } else if (err.code === err.TIMEOUT) {
-        displayMessage(T('locTimeout') || "位置情報の取得がタイムアウトしました。");
-      } else {
-        displayMessage(T('locUnavailable') || "位置情報を取得できませんでした。");
-      }
+    (error) => {
+      displayMessage(MSG[APP_LANG].geolocFail(error.message));
     },
-    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 3000,
+    }
   );
 }
 
@@ -616,6 +593,7 @@ function locateOnce(zoom = true) {
 function startTracking() {
   if (!navigator.geolocation || watchId) return;
   tracking = true;
+  setCurrentBtnState(true);
 
   watchId = navigator.geolocation.watchPosition(
     (pos) => {
@@ -634,17 +612,16 @@ function startTracking() {
       }
       lastUpdateTs = now;
 
-      // 追跡中は地図も軽く追従させる
       map.panTo(curr);
     },
     (err) => {
       stopTracking();
       if (err.code === err.PERMISSION_DENIED) {
-        displayMessage(T('locPermissionDenied') || "位置情報の許可がありません。");
+        displayMessage(T('locPermissionDenied'));
       } else if (err.code === err.TIMEOUT) {
-        displayMessage(T('locTimeout') || "位置情報の取得がタイムアウトしました。");
+        displayMessage(T('locTimeout'));
       } else {
-        displayMessage(T('locUnavailable') || "位置情報を取得できませんでした。");
+        displayMessage(T('locUnavailable'));
       }
     },
     { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
@@ -658,72 +635,36 @@ function stopTracking() {
     watchId = null;
   }
   tracking = false;
+  setCurrentBtnState(false);
 }
 
-// 現在位置ボタン（タップ／長押し）のインタラクション初期化
+// 現在位置ボタン（タップでトラッキングON/OFF）
 function initCurrentButton() {
   const btn = document.getElementById('btn-current');
   if (!btn) return;
 
-  const LONG_PRESS_MS = 500; // 500ms以上の押下で長押し判定
-  let pressTimer = null;
-  let longPressed = false;
+  // 初期状態：未取得（グレーラベル）
+  setCurrentBtnState(false);
 
-  // 初期表示：通常時
-  setCurrentButtonStatusLabel('idle');
-
-  const clearTimer = () => {
-    if (pressTimer) {
-      clearTimeout(pressTimer);
-      pressTimer = null;
+  // タップ（クリック）でトラッキングON/OFF
+  btn.addEventListener('click', () => {
+    if (!tracking) {
+      startTracking();
+      displayMessage(T('trackingOn'));
+    } else {
+      stopTracking();
+      displayMessage(T('trackingOff'));
     }
-  };
+  });
 
-  const onPointerDown = () => {
-    longPressed = false;
-    // 一定時間押され続けたら「長押し」とみなす
-    pressTimer = setTimeout(() => {
-      longPressed = true;
-      // 長押し：現在位置の追跡ON/OFFトグル
-      if (!tracking) {
-        startTracking();
-        btn.classList.add('active');   // 追跡中は水色のまま
-        setCurrentButtonStatusLabel('tracking'); // ← 追加
-        displayMessage(T('trackingOn') || "現在位置の追跡を開始しました。");
-      } else {
-        stopTracking();
-        btn.classList.remove('active');
-        setCurrentButtonStatusLabel('idle');     // ← 追加
-        displayMessage(T('trackingOff') || "現在位置の追跡を停止しました。");
-      }
-    }, LONG_PRESS_MS);
-  };
-
-  const onPointerUp = () => {
-    // 短押し（タップ）の場合のみ、現在位置へズーム＋一瞬光る
-    if (!longPressed) {
-      btn.classList.add('flash');      // CSSアニメーションで一瞬水色
-      setCurrentButtonStatusLabel('searching');
-      locateOnce(true);                // 現在位置にズーム
-      setTimeout(() => {
-        btn.classList.remove('flash');
-        // 追跡中でなければ「現在地」に戻す
-        setCurrentButtonStatusLabel(tracking ? 'tracking' : 'idle'); // ← 追加
-      }, 600);
+  // キーボード（Enter/Space）対応
+  btn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      btn.click();
     }
-    clearTimer();
-  };
-
-  const onCancel = () => {
-    clearTimer();
-  };
-
-  btn.addEventListener('pointerdown', onPointerDown);
-  btn.addEventListener('pointerup', onPointerUp);
-  btn.addEventListener('pointerleave', onCancel);
-  btn.addEventListener('pointercancel', onCancel);
+  });
 }
-
 
 // ===== Googleマップ（別タブ）で開く =====
 function openInGoogleMaps(origin, destination) {
@@ -741,43 +682,6 @@ function launchGoogleMap() {
     { lat: origin.lat(), lng: origin.lng() },
     latestDestination.location
   );
-}
-
-// ===== 現在地から避難 =====
-function useCurrentLocation() {
-  if (!dataReady) { displayMessage(T('loading')); return; }
-
-  // 1) 追跡中 or 直前に locateOnce 済みなら、その座標を即時利用
-  const tracked = currentMarker?.getPosition();
-  if (tracked) {
-    setStartPoint(tracked);
-    // 追跡OFF時のみ軽く寄せる（追跡ONなら自動追従に任せる）
-    if (!tracking && map) { map.panTo(tracked); }
-    return;
-  }
-
-  // 2) フォールバック：一回だけ現在地を取得
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const latLng = new google.maps.LatLng(
-          position.coords.latitude,
-          position.coords.longitude
-        );
-        setStartPoint(latLng);
-      },
-      (error) => {
-        displayMessage(MSG[APP_LANG].geolocFail(error.message));
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 3000, // ← 軽いキャッシュ許容。端末実装のクセを回避
-      }
-    );
-  } else {
-    displayMessage(T('browserNoGeo'));
-  }
 }
 
 // Google Maps の callback から参照できるように公開
