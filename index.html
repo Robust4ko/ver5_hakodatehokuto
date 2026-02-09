@@ -144,7 +144,7 @@
 #btn-current svg { width: 22px; height: 22px; }
 
 /* 矢印の色（常にグレー固定） */
-#btn-current .arrow { fill: #9aa0a6 !important; transition: fill .18s ease; }
+#btn-current .arrow { fill: #9aa0a6 ; transition: fill .18s ease; }
 
 /* ラベル（ボタン直下・中央揃え） */
 #btn-current .status-label {
@@ -161,6 +161,24 @@
   pointer-events: none; /* 地図操作を邪魔しない */
 }
 
+/* 矢印の青点滅（不透明度でゆっくり鼓動） */
+@keyframes btn-arrow-pulse {
+  0%, 100% { fill-opacity: 1; }
+  50%      { fill-opacity: 0.35; }
+}
+
+/* ボタン外周の青い淡いグローも同期させる（お好みで強度調整可） */
+@keyframes btn-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 2px 10px rgba(0,0,0,.2), 0 0 0 rgba(26,115,232,0);
+    border-color: rgba(0,0,0,.06);
+  }
+  50% {
+    box-shadow: 0 2px 10px rgba(0,0,0,.2), 0 0 16px rgba(26,115,232,.45);
+    border-color: rgba(26,115,232,.35);
+  }
+}
+
 /* 現在地マーカーをゆっくり点滅させるアニメーション */
 @keyframes pulse-blue {
   0%   { fill-opacity: 1; }
@@ -175,6 +193,17 @@
 
 /* トラッキング中のみラベル色を水色に（色だけ変える） */
 #btn-current.tracking .status-label { color: #1a73e8; }
+
+/* トラッキング中：矢印を青く＆ゆっくり点滅 */
+#btn-current.tracking .arrow {
+  fill: #1a73e8;
+  animation: btn-arrow-pulse 2s ease-in-out infinite;
+}
+
+/* トラッキング中：ボタン自体にも淡い青グローを点滅で付与 */
+#btn-current.tracking {
+  animation: btn-glow-pulse 2s ease-in-out infinite;
+}
 
 /* 初期の軽いグレーアウト演出（任意） */
 #btn-current.idle { opacity: .85; }
