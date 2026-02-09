@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <title>津波避難シミュレーション</title>
+  <title>逃げるーと</title>
   <style>
     :root { --header-h: 64px; }
     * { box-sizing: border-box; }
@@ -179,18 +179,6 @@
   }
 }
 
-/* 現在地マーカーをゆっくり点滅させるアニメーション */
-@keyframes pulse-blue {
-  0%   { fill-opacity: 1; }
-  50%  { fill-opacity: 0.4; }
-  100% { fill-opacity: 1; }
-}
-
-/* マーカーに .pulsing クラスがついたときにアニメ適用 */
-.pulsing-marker {
-  animation: pulse-blue 2s ease-in-out infinite;
-}
-
 /* トラッキング中のみラベル色を水色に（色だけ変える） */
 #btn-current.tracking .status-label { color: #1a73e8; }
 
@@ -219,8 +207,8 @@
 <body>
   <header>
     <div class="header-left">
-      <h1 id="title">津波避難シミュレーション</h1>
-      <p class="subtext" id="subtext">📍 地図をクリックすると避難経路を表示します</p>
+      <h1 id="title">逃げるーと</h1>
+      <p class="subtext" id="subtext">地図をタップすると避難経路を表示します</p>
     </div>
     <button id="lang-toggle" class="lang-toggle" aria-label="switch language">EN</button>
   </header>
@@ -244,8 +232,8 @@
       </div>
     </div>
     <div class="info-area">
-      <h2 id="info-title">最短の避難先：</h2>
-      <p id="nearest-destination">クリックして確認してください</p>
+      <h2 id="info-title">最短の避難場所：</h2>
+      <p id="nearest-destination">タップして確認してください</p>
       <div class="button-row">
         <button id="btn-use-location" class="use-location" onclick="useCurrentLocation()">現在地から避難</button>
         <button id="btn-launch-gmap" class="launch-gmap" onclick="launchGoogleMap()">Googleマップ</button>
@@ -259,19 +247,19 @@
     // UIテキスト辞書（日本語/英語）
     const UI_TEXT = {
       ja: {
-        title: "津波避難シミュレーション",
-        subtext: "📍 地図をクリックすると避難経路を表示します",
-        infoTitle: "最短の避難先：",
-        nearestPlaceholder: "クリックして確認してください",
+        title: "逃げるーと",
+        subtext: "地図をタップすると避難経路を表示します",
+        infoTitle: "最寄り避難場所：",
+        nearestPlaceholder: "タップして確認してください",
         btnUseLocation: "現在地から避難",
         btnLaunchGmap: "Googleマップ",
         toggleLabel: "EN"
       },
       en: {
         title: "Tsunami Evacuation Simulation",
-        subtext: "📍 Click the map to show an evacuation route",
+        subtext: "Tap the map to show an evacuation route",
         infoTitle: "Nearest destination:",
-        nearestPlaceholder: "Click the map to check",
+        nearestPlaceholder: "Tap the map to check",
         btnUseLocation: "Evacuate from current location",
         btnLaunchGmap: "Open Google Maps",
         toggleLabel: "日"
