@@ -523,6 +523,7 @@ function updateCurrentOverlay(pos) {
         strokeWeight: 2,
       },
     });
+    currentMarker._isCustom = true; // フラグを付けて後でアクセスしやすく
   } else {
     currentMarker.setPosition(ll);
   }
@@ -594,6 +595,19 @@ function startTracking() {
   if (!navigator.geolocation || watchId) return;
   tracking = true;
   setCurrentBtnState(true);
+
+    // マーカー点滅ON
+  if (currentMarker?.getIcon && currentMarker.setIcon) {
+    const icon = currentMarker.getIcon();
+    currentMarker.setIcon({
+      ...icon,
+      fillOpacity: 1, // base
+    });
+    currentMarker.getLabel = () => ({
+      className: 'pulsing-marker',
+      text: '',
+    });
+  }
 
   watchId = navigator.geolocation.watchPosition(
     (pos) => {
