@@ -121,6 +121,81 @@
       pointer-events: auto;
     }
 
+/* === 現在位置ボタン（見た目） === */
+#btn-current {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #fff;                 /* ← 常に白い丸 */
+  box-shadow: 0 2px 10px rgba(0,0,0,.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  z-index: 1000;
+  border: 1px solid rgba(0,0,0,.06);
+  transition: transform .06s ease;
+}
+#btn-current:active { transform: scale(.98); }
+#btn-current svg { width: 22px; height: 22px; }
+
+/* 矢印の色（常にグレー固定） */
+#btn-current .arrow { fill: #9aa0a6 ; transition: fill .18s ease; }
+
+/* ラベル（ボタン直下・中央揃え） */
+#btn-current .status-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%); /* 円の中心線と文字中心線を一致 */
+  margin-top: 4px;
+  font-size: 11px;  /* 小さめ */
+  line-height: 1;
+  color: #9aa0a6;   /* 通常はグレー */
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none; /* 地図操作を邪魔しない */
+}
+
+/* 矢印の青点滅（不透明度でゆっくり鼓動） */
+@keyframes btn-arrow-pulse {
+  0%, 100% { fill-opacity: 1; }
+  50%      { fill-opacity: 0.35; }
+}
+
+/* ボタン外周の青い淡いグローも同期させる（お好みで強度調整可） */
+@keyframes btn-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 2px 10px rgba(0,0,0,.2), 0 0 0 rgba(26,115,232,0);
+    border-color: rgba(0,0,0,.06);
+  }
+  50% {
+    box-shadow: 0 2px 10px rgba(0,0,0,.2), 0 0 16px rgba(26,115,232,.45);
+    border-color: rgba(26,115,232,.35);
+  }
+}
+
+/* トラッキング中のみラベル色を水色に（色だけ変える） */
+#btn-current.tracking .status-label { color: #1a73e8; }
+
+/* トラッキング中：矢印を青く＆ゆっくり点滅 */
+#btn-current.tracking .arrow {
+  fill: #1a73e8;
+  animation: btn-arrow-pulse 2s ease-in-out infinite;
+}
+
+/* トラッキング中：ボタン自体にも淡い青グローを点滅で付与 */
+#btn-current.tracking {
+  animation: btn-glow-pulse 2s ease-in-out infinite;
+}
+
+/* 初期の軽いグレーアウト演出（任意） */
+#btn-current.idle { opacity: .85; }
+
     @media (max-width: 768px) {
       :root { --header-h: 58px; }
       header h1 { font-size: 1rem; }
@@ -141,9 +216,23 @@
   <div class="container">
     <div class="map-area">
       <div id="map"></div>
+
+      <!-- 現在位置ボタン：タップでトラッキングON/OFF（ラベル色のみ変化） -->
+      <div id="btn-current"
+           class="idle"
+           role="button"
+           aria-label="現在地"
+           aria-pressed="false"
+           title="現在地"
+           tabindex="0">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path class="arrow" d="M12 2 L18 18 L12 14 L6 18 L10 10 Z"></path>
+        </svg>
+        <div class="status-label" aria-hidden="true">現在地</div>
+      </div>
     </div>
     <div class="info-area">
-      <h2 id="info-title">最寄り避難場所：</h2>
+      <h2 id="info-title">最短の避難場所：</h2>
       <p id="nearest-destination">タップして確認してください</p>
       <div class="button-row">
         <button id="btn-use-location" class="use-location" onclick="useCurrentLocation()">現在地から避難</button>
